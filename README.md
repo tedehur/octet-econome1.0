@@ -388,3 +388,5 @@ Puis ouvrir le README ou la documentation dans `docs/architecture.md`.
 
 Le dépôt est un support pour un projet de recherche et de démonstration. Il est conçu pour être extensible, documenté et réutilisable dans des contextes de codage spatial, de transport robuste ou d'informatique distribuée résiliente.
 
+## Resultats de la simulation
+Les resultats complets de la derniere execution sont disponibles dans le fichier [resultats_simulation.txt](resultats_simulation.txt).
