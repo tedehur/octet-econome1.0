@@ -1,0 +1,310 @@
+use std::collections::VecDeque;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Point { pub ligne: u8, pub col: u8 }
+
+pub const COURONNE: [Point; 8] = [
+    Point { ligne: 0, col: 0 },
+    Point { ligne: 0, col: 1 },
+    Point { ligne: 0, col: 2 },
+    Point { ligne: 1, col: 2 },
+    Point { ligne: 2, col: 2 },
+    Point { ligne: 2, col: 1 },
+    Point { ligne: 2, col: 0 },
+    Point { ligne: 1, col: 0 },
+];
+pub const CENTRE: Point = Point { ligne: 1, col: 1 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Cellule { pub points: [[bool; 3]; 3] }
+
+impl Cellule {
+    pub fn vide() -> Self { Cellule { points: [[false; 3]; 3] } }
+    pub fn get(&self, p: Point) -> bool { self.points[p.ligne as usize][p.col as usize] }
+    pub fn set(&mut self, p: Point, v: bool) { self.points[p.ligne as usize][p.col as usize] = v; }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Etat { Plein, Vide, Inconnu }
+
+pub struct CellulePartielle { pub points: [[Etat; 3]; 3] }
+
+impl CellulePartielle {
+    pub fn depuis(c: &Cellule) -> Self {
+        let mut p = CellulePartielle { points: [[Etat::Vide; 3]; 3] };
+        for l in 0..3 { for col in 0..3 {
+            p.points[l][col] = if c.points[l][col] { Etat::Plein } else { Etat::Vide };
+        }}
+        p
+    }
+    pub fn get(&self, p: Point) -> Etat { self.points[p.ligne as usize][p.col as usize] }
+    pub fn set(&mut self, p: Point, e: Etat) { self.points[p.ligne as usize][p.col as usize] = e; }
+    pub fn marquer_inconnu_idx(&mut self, idx: usize) {
+        let p = if idx == 8 { CENTRE } else { COURONNE[idx] };
+        self.set(p, Etat::Inconnu);
+    }
+    pub fn inconnus_couronne(&self) -> Vec<usize> {
+        (0..8).filter(|&i| self.get(COURONNE[i]) == Etat::Inconnu).collect()
+    }
+    pub fn centre_inconnu(&self) -> bool { self.get(CENTRE) == Etat::Inconnu }
+}
+
+pub fn encoder(octet: u8) -> Cellule {
+    let mut c = Cellule::vide();
+    for i in 0..8 {
+        c.set(COURONNE[i], (octet >> i) & 1 == 1);
+    }
+    c.set(CENTRE, (octet.count_ones() & 1) == 1);
+    c
+}
+
+pub fn lire_octet(c: &Cellule) -> u8 {
+    let mut o = 0u8;
+    for i in 0..8 {
+        if c.get(COURONNE[i]) { o |= 1 << i; }
+    }
+    o
+}
+
+fn parite_couronne(c: &Cellule) -> bool {
+    let mut p = false;
+    for &pt in COURONNE.iter() { p ^= c.get(pt); }
+    p
+}
+
+pub struct MemoireTextures {
+    densite:     [u32; 9],
+    symetries:   [u32; 16],
+    transitions: [u32; 5],
+    continuite:  [u32; 9],
+    total:       u32,
+    scores_recents: VecDeque<f64>,
+    marge:       f64,
+}
+
+impl MemoireTextures {
+    pub fn nouvelle(marge: f64) -> Self {
+        MemoireTextures {
+            densite: [0; 9], symetries: [0; 16],
+            transitions: [0; 5], continuite: [0; 9],
+            total: 0, scores_recents: VecDeque::new(), marge,
+        }
+    }
+
+    fn metriques(c: &Cellule) -> (u8, u8, u8, u8) {
+        let bits: Vec<bool> = (0..8).map(|i| c.get(COURONNE[i])).collect();
+        let d = bits.iter().filter(|&&b| b).count() as u8;
+        let mut s = 0u8;
+        if (0..4).all(|i| bits[i] == bits[7 - i]) { s |= 1; }
+        if (0..4).all(|i| bits[i] == bits[i + 4]) { s |= 2; }
+        if (0..8).all(|i| bits[i] == bits[(i + 2) % 8]) { s |= 4; }
+        if (0..8).all(|i| bits[i] == bits[(8 - i) % 8]) { s |= 8; }
+        let mut t = 0u8;
+        for i in 0..8 { if bits[i] != bits[(i + 1) % 8] { t += 1; } }
+        t /= 2;
+        let mut c_max = 0u8;
+        let mut c_cur = 0u8;
+        for i in 0..16 {
+            if bits[i % 8] { c_cur += 1; c_max = c_max.max(c_cur); }
+            else { c_cur = 0; }
+        }
+        (d, s, t, c_max.min(8))
+    }
+
+    pub fn score(&self, c: &Cellule) -> f64 {
+        let (d, s, t, cm) = Self::metriques(c);
+        let n = self.total as f64;
+        let p_d = (self.densite[d as usize] + 1) as f64 / (n + 9.0);
+        let p_s = (self.symetries[s as usize] + 1) as f64 / (n + 16.0);
+        let p_t = (self.transitions[t as usize] + 1) as f64 / (n + 5.0);
+        let p_c = (self.continuite[cm as usize] + 1) as f64 / (n + 9.0);
+        p_d.ln() + p_s.ln() + p_t.ln() + p_c.ln()
+    }
+
+    pub fn seuil(&self) -> f64 {
+        if self.scores_recents.is_empty() { return f64::NEG_INFINITY; }
+        let moy = self.scores_recents.iter().sum::<f64>() / self.scores_recents.len() as f64;
+        moy - self.marge
+    }
+
+    pub fn apprendre(&mut self, c: &Cellule) {
+        let (d, s, t, cm) = Self::metriques(c);
+        self.densite[d as usize] += 1;
+        self.symetries[s as usize] += 1;
+        self.transitions[t as usize] += 1;
+        self.continuite[cm as usize] += 1;
+        self.total += 1;
+        let sc = self.score(c);
+        self.scores_recents.push_back(sc);
+        if self.scores_recents.len() > 100 { self.scores_recents.pop_front(); }
+    }
+
+    pub fn accepter(&self, c: &Cellule) -> bool {
+        self.score(c) >= self.seuil()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResultatSim { Exacte(u8), Fausse(u8), Refus }
+
+fn enumerer_valides(part: &CellulePartielle, inconnus: &[usize]) -> Vec<Cellule> {
+    let mut out = Vec::new();
+    for mask in 0..(1u8 << inconnus.len()) {
+        let mut c = Cellule::vide();
+        for i in 0..8 {
+            match part.get(COURONNE[i]) {
+                Etat::Plein => c.set(COURONNE[i], true),
+                Etat::Vide  => c.set(COURONNE[i], false),
+                Etat::Inconnu => {}
+            }
+        }
+        c.set(CENTRE, part.get(CENTRE) == Etat::Plein);
+        for (k, &idx) in inconnus.iter().enumerate() {
+            c.set(COURONNE[idx], (mask >> k) & 1 == 1);
+        }
+        if parite_couronne(&c) == c.get(CENTRE) { out.push(c); }
+    }
+    out
+}
+
+fn completer_un(part: &CellulePartielle, idx: usize) -> Cellule {
+    let mut c = Cellule::vide();
+    for i in 0..8 {
+        match part.get(COURONNE[i]) {
+            Etat::Plein => c.set(COURONNE[i], true),
+            Etat::Vide  => c.set(COURONNE[i], false),
+            Etat::Inconnu => {}
+        }
+    }
+    c.set(CENTRE, part.get(CENTRE) == Etat::Plein);
+    let mut p = false;
+    for i in 0..8 { if i != idx { p ^= c.get(COURONNE[i]); } }
+    let v = p ^ c.get(CENTRE);
+    c.set(COURONNE[idx], v);
+    c
+}
+
+fn reconstruire(part: &CellulePartielle, memoire: Option<&MemoireTextures>) -> ResultatSim {
+    let inconnus = part.inconnus_couronne();
+    let centre_inc = part.centre_inconnu();
+
+    if inconnus.is_empty() && !centre_inc {
+        let mut c = Cellule::vide();
+        for i in 0..8 { c.set(COURONNE[i], part.get(COURONNE[i]) == Etat::Plein); }
+        c.set(CENTRE, part.get(CENTRE) == Etat::Plein);
+        return if parite_couronne(&c) == c.get(CENTRE) { ResultatSim::Exacte(lire_octet(&c)) } else { ResultatSim::Refus };
+    }
+
+    if inconnus.len() == 1 && !centre_inc {
+        let c = completer_un(part, inconnus[0]);
+        return ResultatSim::Exacte(lire_octet(&c));
+    }
+
+    if inconnus.is_empty() && centre_inc {
+        let mut c = Cellule::vide();
+        for i in 0..8 { c.set(COURONNE[i], part.get(COURONNE[i]) == Etat::Plein); }
+        c.set(CENTRE, parite_couronne(&c));
+        return ResultatSim::Exacte(lire_octet(&c));
+    }
+
+    if inconnus.len() == 2 && !centre_inc {
+        let cands = enumerer_valides(part, &inconnus);
+        if cands.is_empty() { return ResultatSim::Refus; }
+        return match memoire {
+            None => ResultatSim::Refus,
+            Some(mem) => {
+                let acceptes: Vec<&Cellule> = cands.iter().filter(|c| mem.accepter(c)).collect();
+                if acceptes.len() == 1 { ResultatSim::Exacte(lire_octet(acceptes[0])) } else { ResultatSim::Refus }
+            }
+        };
+    }
+    ResultatSim::Refus
+}
+
+struct StatsK { k: usize, ex: f64, fa: f64, rf: f64 }
+
+fn xorshift(graine: u64) -> impl FnMut() -> usize {
+    let mut s = graine;
+    move || { s ^= s << 13; s ^= s >> 7; s ^= s << 17; (s as usize) % 9 }
+}
+
+fn octet_realiste(rng: &mut impl FnMut() -> usize) -> u8 {
+    match rng() % 10 {
+        0..=5 => (rng() as u8) & 0x1F,
+        6..=8 => (rng() as u8) & 0xFF,
+        _     => 0x00,
+    }
+}
+
+fn simuler_perte(octet: u8, k: usize, mem: Option<&MemoireTextures>, rng: &mut impl FnMut() -> usize) -> ResultatSim {
+    let c = encoder(octet);
+    let mut positions: Vec<usize> = (0..9).collect();
+    for i in 0..k {
+        let j = i + rng() % (9 - i);
+        positions.swap(i, j);
+    }
+    let mut part = CellulePartielle::depuis(&c);
+    for &idx in &positions[..k] { part.marquer_inconnu_idx(idx); }
+    reconstruire(&part, mem)
+}
+
+fn lancer_simulation(label: &str, avec_texture: bool, essais: usize) -> Vec<StatsK> {
+    let mut mem = MemoireTextures::nouvelle(1.0);
+    let mut rng = xorshift(0xCAFEBABE);
+
+    if avec_texture {
+        for _ in 0..5000 { let o = octet_realiste(&mut rng); mem.apprendre(&encoder(o)); }
+        println!("\n[{}] Mémoire pré-entraînée : {} échantillons, seuil = {:.3}", label, mem.total, mem.seuil());
+    }
+
+    let mut stats = Vec::new();
+    for k in 0..=4 {
+        let (mut ex, mut fa, mut rf) = (0u64, 0u64, 0u64);
+        for octet in 0u8..=255 {
+            for _ in 0..essais {
+                let r = simuler_perte(octet, k, if avec_texture { Some(&mem) } else { None }, &mut rng);
+                match r {
+                    ResultatSim::Exacte(_) => ex += 1,
+                    ResultatSim::Fausse(_) => fa += 1,
+                    ResultatSim::Refus     => rf += 1,
+                }
+            }
+        }
+        let t = (256 * essais) as f64;
+        stats.push(StatsK { k, ex: 100.0*ex as f64/t, fa: 100.0*fa as f64/t, rf: 100.0*rf as f64/t });
+    }
+    stats
+}
+
+fn afficher(label: &str, stats: &[StatsK]) {
+    println!("\n=== {} ===", label);
+    println!("┌──────┬──────────┬──────────┬──────────┐");
+    println!("│  k   │ Exactes  │ Fausses  │  Refus   │");
+    println!("├──────┼──────────┼──────────┼──────────┤");
+    for s in stats {
+        println!("│ {:>4} │ {:>7.2}% │ {:>7.2}% │ {:>7.2}% │", s.k, s.ex, s.fa, s.rf);
+    }
+    println!("└──────┴──────────┴──────────┴──────────┘");
+}
+
+fn main() {
+    println!("╔══════════════════════════════════════════════════════╗");
+    println!("║  BIBRAI — Simulation de résilience v2               ║");
+    println!("║  Grille 3x3, 8 bits + parité centrale              ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+
+    let essais = 200;
+    let s_sans = lancer_simulation("SANS TEXTURE", false, essais);
+    let s_avec = lancer_simulation("AVEC TEXTURE", true, essais);
+
+    afficher("SANS TEXTURE (règle d'or : pas de devinette)", &s_sans);
+    afficher("AVEC TEXTURE (devin.os filtre les candidats)", &s_avec);
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║  SYNTHÈSE                                           ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    for k in 0..=4 {
+        println!("k={} : sans = {:.1}% exacte / {:.1}% fausse  →  avec = {:.1}% exacte / {:.1}% fausse",
+                 k, s_sans[k].ex, s_sans[k].fa, s_avec[k].ex, s_avec[k].fa);
+    }
+}
