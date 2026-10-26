@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="850" viewBox="0 0 850 850">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1">
+      <stop offset="0%" stop-color="#101c2d"/>
+      <stop offset="100%" stop-color="#13243d"/>
+    </linearGradient>
+    <style>
+      .title { font: 700 24px 'Segoe UI', sans-serif; fill: #edf8ff; }
+      .label { font: 600 18px 'Segoe UI', sans-serif; fill: #edf8ff; }
+      .small { font: 500 13px 'Segoe UI', sans-serif; fill: #c9dcff; }
+      .point { fill: #eaf0ff; stroke: #81c4ff; stroke-width: 2; }
+      .parity { fill: #6ee7b7; stroke: #65d1ab; stroke-width: 2; }
+      .core { fill: #203a5a; stroke: #9cc8ff; stroke-width: 2; }
+      .line { stroke: #90ccff; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="850" height="850" fill="url(#bg)"/>
+  <text x="60" y="60" class="title">Cellule Bibrai 3×3</text>
+
+  <!-- Grid -->
+  <g transform="translate(150,140)">
+    <rect x="0" y="0" width="420" height="420" class="core" rx="12"/>
+
+    <!-- rows -->
+    <path class="line" d="M0 140 H420"/>
+    <path class="line" d="M0 280 H420"/>
+    <path class="line" d="M140 0 V420"/>
+    <path class="line" d="M280 0 V420"/>
+
+    <!-- points -->
+    <circle cx="70" cy="70" r="26" class="point"/>
+    <circle cx="210" cy="70" r="26" class="point"/>
+    <circle cx="350" cy="70" r="26" class="point"/>
+
+    <circle cx="70" cy="210" r="26" class="point"/>
+    <circle cx="210" cy="210" r="26" class="parity"/>
+    <circle cx="350" cy="210" r="26" class="point"/>
+
+    <circle cx="70" cy="350" r="26" class="point"/>
+    <circle cx="210" cy="350" r="26" class="point"/>
+    <circle cx="350" cy="350" r="26" class="point"/>
+
+    <!-- labels -->
+    <text x="70" y="78" text-anchor="middle" class="label">d1</text>
+    <text x="210" y="78" text-anchor="middle" class="label">d2</text>
+    <text x="350" y="78" text-anchor="middle" class="label">d3</text>
+    <text x="70" y="218" text-anchor="middle" class="label">d8</text>
+    <text x="210" y="218" text-anchor="middle" class="label">P</text>
+    <text x="350" y="218" text-anchor="middle" class="label">d4</text>
+    <text x="70" y="358" text-anchor="middle" class="label">d7</text>
+    <text x="210" y="358" text-anchor="middle" class="label">d6</text>
+    <text x="350" y="358" text-anchor="middle" class="label">d5</text>
+  </g>
+
+  <text x="60" y="650" class="small">La couronne porte les 8 bits, le centre porte la parité XOR de la couronne.</text>
+</svg>
